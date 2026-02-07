@@ -1,0 +1,2 @@
+# Place FAT32 disk images (.img) in this folder
+# They will be automatically attached to QEMU when running 'make run'

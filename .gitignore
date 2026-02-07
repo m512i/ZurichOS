@@ -1,0 +1,32 @@
+# Build output
+build/
+*.o
+*.elf
+*.bin
+*.iso
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Disk images
+disks/fat32disk.img
+
+# Toolchain build artifacts
+*.tar.xz
+*.tar.gz
+
+# Debug files
+*.log
+#core
+#CHECKLIST.md
+OS_Development_Roadmap.pdf
+CHECKLIST.md
+CHECKLIST_V2.md
