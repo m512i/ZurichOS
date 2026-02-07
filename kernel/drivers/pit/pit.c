@@ -4,6 +4,7 @@
  */
 
 #include <drivers/pit.h>
+#include <drivers/mouse.h>
 #include <arch/x86/idt.h>
 #include <kernel/kernel.h>
 #include <kernel/scheduler.h>
@@ -16,6 +17,7 @@ static void pit_handler(registers_t *regs)
 {
     (void)regs;
     pit_ticks++;
+    mouse_tick();
     scheduler_tick();
 }
 
@@ -23,6 +25,7 @@ static void lapic_timer_irq_handler(registers_t *regs)
 {
     (void)regs;
     lapic_timer_handler();
+    mouse_tick();
     scheduler_tick();
 }
 

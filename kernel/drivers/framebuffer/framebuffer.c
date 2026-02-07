@@ -17,6 +17,15 @@ static int fb_available = 0;
 static int fb_swap_deferred = 0;
 static volatile int fb_dirty = 0;
 
+static void (*vram_pre_hook)(void) = NULL;
+static void (*vram_post_hook)(void) = NULL;
+
+void fb_set_vram_hooks(void (*pre)(void), void (*post)(void))
+{
+    vram_pre_hook = pre;
+    vram_post_hook = post;
+}
+
 
 #define FB_SCROLLBACK_LINES 1000
 #define FB_MAX_COLS         128
@@ -234,7 +243,7 @@ void fb_swap_buffers(void)
     if (!fb_available) return;
 
     if (fb.back_buffer != fb.addr) {
-        
+        if (vram_pre_hook) vram_pre_hook();
         uint32_t *src = fb.back_buffer;
         uint32_t *dst = fb.addr;
         uint32_t dwords = fb.size >> 2;
@@ -245,6 +254,7 @@ void fb_swap_buffers(void)
             :
             : "memory"
         );
+        if (vram_post_hook) vram_post_hook();
     }
 }
 
@@ -256,13 +266,11 @@ void fb_flush(void)
     if (fb.back_buffer == fb.addr) return;
 
     if (fb_dirty_full) {
-        
         fb_swap_buffers();
         fb_dirty_reset();
         return;
     }
 
-    
     if (fb_dirty_x0 >= fb_dirty_x1 || fb_dirty_y0 >= fb_dirty_y1) {
         fb_dirty_reset();
         return;
@@ -272,7 +280,8 @@ void fb_flush(void)
     if (fb_dirty_x0 < 0) fb_dirty_x0 = 0;
     if (fb_dirty_y0 < 0) fb_dirty_y0 = 0;
 
-    
+    if (vram_pre_hook) vram_pre_hook();
+
     uint32_t pitch_dwords = fb.pitch >> 2;
     for (int y = fb_dirty_y0; y < fb_dirty_y1; y++) {
         uint32_t *src = fb.back_buffer + y * pitch_dwords + fb_dirty_x0;
@@ -281,6 +290,7 @@ void fb_flush(void)
         memcpy(dst, src, count * 4);
     }
 
+    if (vram_post_hook) vram_post_hook();
     fb_dirty_reset();
 }
 
@@ -753,7 +763,113 @@ void fb_console_end_batch(void)
         fb_swap_buffers();
 }
 
+uint32_t fb_console_get_cursor_x(void)
+{
+    return fb.cursor_x;
+}
 
+uint32_t fb_console_get_cursor_y(void)
+{
+    return fb.cursor_y;
+}
+
+void fb_console_set_cursor_pos(uint32_t x, uint32_t y)
+{
+    if (!fb_available) return;
+    if (x >= fb.text_cols) x = fb.text_cols - 1;
+    if (y >= fb.text_rows) y = fb.text_rows - 1;
+
+    fb_console_draw_cursor(fb.bg_color);
+    fb.cursor_x = x;
+    fb.cursor_y = y;
+    fb_console_draw_cursor(FB_TERM_CURSOR);
+    fb_dirty = 1;
+}
+
+static uint32_t hl_r0 = 0, hl_c0 = 0, hl_r1 = 0, hl_c1 = 0;
+static int hl_active = 0;
+
+static void hl_draw_cell(uint32_t row, uint32_t col, int inverted)
+{
+    fb_cell_t *cell = &fb_screen[row][col];
+    char ch = (cell->ch > ' ') ? cell->ch : ' ';
+    if (inverted)
+        fb_draw_char(col * FB_FONT_WIDTH, row * FB_FONT_HEIGHT, ch, FB_TERM_BG, FB_TERM_FG);
+    else
+        fb_draw_char(col * FB_FONT_WIDTH, row * FB_FONT_HEIGHT, ch, cell->fg, cell->bg);
+}
+
+void fb_console_highlight(uint32_t r0, uint32_t c0, uint32_t r1, uint32_t c1)
+{
+    if (!fb_available) return;
+
+    if (r0 > r1 || (r0 == r1 && c0 > c1)) {
+        uint32_t tr = r0, tc = c0;
+        r0 = r1; c0 = c1;
+        r1 = tr; c1 = tc;
+    }
+    if (r1 >= fb.text_rows) r1 = fb.text_rows - 1;
+    if (c0 >= fb.text_cols) c0 = fb.text_cols - 1;
+    if (c1 >= fb.text_cols) c1 = fb.text_cols - 1;
+
+    if (hl_active) {
+        fb_console_clear_highlight();
+    }
+
+    hl_r0 = r0; hl_c0 = c0;
+    hl_r1 = r1; hl_c1 = c1;
+    hl_active = 1;
+
+    if (r0 == r1) {
+        for (uint32_t c = c0; c <= c1; c++)
+            hl_draw_cell(r0, c, 1);
+        fb_dirty_mark(c0 * FB_FONT_WIDTH, r0 * FB_FONT_HEIGHT,
+                      (c1 - c0 + 1) * FB_FONT_WIDTH, FB_FONT_HEIGHT);
+    } else {
+        for (uint32_t c = c0; c < fb.text_cols; c++)
+            hl_draw_cell(r0, c, 1);
+        for (uint32_t r = r0 + 1; r < r1; r++)
+            for (uint32_t c = 0; c < fb.text_cols; c++)
+                hl_draw_cell(r, c, 1);
+        for (uint32_t c = 0; c <= c1; c++)
+            hl_draw_cell(r1, c, 1);
+        fb_dirty_mark(0, r0 * FB_FONT_HEIGHT,
+                      fb.text_cols * FB_FONT_WIDTH, (r1 - r0 + 1) * FB_FONT_HEIGHT);
+    }
+    fb_dirty = 1;
+}
+
+void fb_console_clear_highlight(void)
+{
+    if (!fb_available || !hl_active) return;
+
+    if (hl_r0 == hl_r1) {
+        for (uint32_t c = hl_c0; c <= hl_c1; c++)
+            hl_draw_cell(hl_r0, c, 0);
+        fb_dirty_mark(hl_c0 * FB_FONT_WIDTH, hl_r0 * FB_FONT_HEIGHT,
+                      (hl_c1 - hl_c0 + 1) * FB_FONT_WIDTH, FB_FONT_HEIGHT);
+    } else {
+        for (uint32_t c = hl_c0; c < fb.text_cols; c++)
+            hl_draw_cell(hl_r0, c, 0);
+        for (uint32_t r = hl_r0 + 1; r < hl_r1; r++)
+            for (uint32_t c = 0; c < fb.text_cols; c++)
+                hl_draw_cell(r, c, 0);
+        for (uint32_t c = 0; c <= hl_c1; c++)
+            hl_draw_cell(hl_r1, c, 0);
+        fb_dirty_mark(0, hl_r0 * FB_FONT_HEIGHT,
+                      fb.text_cols * FB_FONT_WIDTH, (hl_r1 - hl_r0 + 1) * FB_FONT_HEIGHT);
+    }
+    fb_dirty = 1;
+    hl_active = 0;
+}
+
+char fb_console_get_char(uint32_t row, uint32_t col)
+{
+    if (!fb_available || row >= fb.text_rows || col >= fb.text_cols)
+        return ' ';
+    char ch = fb_screen[row][col].ch;
+    return (ch >= 32 && ch < 127) ? ch : ' ';
+}
 
 static void fb_console_render_scrollback(void)
 {

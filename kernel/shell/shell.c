@@ -9,12 +9,21 @@
 #include <drivers/vga.h>
 #include <drivers/framebuffer.h>
 #include <drivers/keyboard.h>
+#include <drivers/mouse.h>
 #include <drivers/serial.h>
 #include <fs/vfs.h>
 #include <string.h>
 
 static char input_buffer[SHELL_BUFFER_SIZE];
 static uint32_t input_pos = 0;
+
+static char selection_buffer[SHELL_BUFFER_SIZE];
+static int selection_active = 0;
+static int32_t sel_start_col = 0;
+static int32_t sel_start_row = 0;
+static int32_t sel_end_col = 0;
+static int32_t sel_end_row = 0;
+static uint32_t prompt_len = 0;
 
 #define HISTORY_SIZE 16
 
@@ -398,9 +407,38 @@ void shell_execute_line(char *line)
     execute_command(copy);
 }
 
+static uint32_t calc_prompt_len(void)
+{
+    vfs_node_t *cwd = shell_get_cwd();
+    uint32_t len = 7; /* "zurich:" */
+    if (cwd && cwd->name[0] != '\0') {
+        char path[VFS_MAX_PATH];
+        char temp[VFS_MAX_PATH];
+        path[0] = '\0';
+        vfs_node_t *dir = cwd;
+        int depth = 0;
+        while (dir && depth < 32) {
+            if (dir->parent && dir->name[0] != '\0') {
+                strcpy(temp, "/");
+                strcat(temp, dir->name);
+                strcat(temp, path);
+                strcpy(path, temp);
+            }
+            dir = dir->parent;
+            depth++;
+        }
+        len += (path[0] == '\0') ? 1 : strlen(path);
+    } else {
+        len += 1;
+    }
+    len += 2; /* "> " */
+    return len;
+}
+
 static void print_prompt(void)
 {
     vfs_node_t *cwd = shell_get_cwd();
+    prompt_len = calc_prompt_len();
     
     vga_puts("zurich:");
     
@@ -653,11 +691,151 @@ void shell_init(void)
     serial_puts("[SHELL] shell_init done\n");
 }
 
+static void shell_mouse_handler(mouse_event_t *event)
+{
+    if (!fb_is_available()) return;
+
+    int col = mouse_get_text_col();
+    int row = mouse_get_text_row();
+    int cols = (int)fb_console_get_cols();
+    int rows = (int)fb_console_get_rows();
+
+    if (col < 0) col = 0;
+    if (col >= cols) col = cols - 1;
+    if (row < 0) row = 0;
+    if (row >= rows) row = rows - 1;
+
+    if (event->type == MOUSE_EVENT_PRESS && event->button == MOUSE_BUTTON_LEFT) {
+        fb_console_clear_highlight();
+        selection_active = 0;
+
+        sel_start_col = col;
+        sel_start_row = row;
+        sel_end_col = col;
+        sel_end_row = row;
+    }
+
+    if (event->type == MOUSE_EVENT_DRAG && (event->buttons & MOUSE_BUTTON_LEFT)) {
+        sel_end_col = col;
+        sel_end_row = row;
+
+        int r0 = sel_start_row, c0 = sel_start_col;
+        int r1 = sel_end_row, c1 = sel_end_col;
+        if (r0 > r1 || (r0 == r1 && c0 > c1)) {
+            int tr = r0, tc = c0;
+            r0 = r1; c0 = c1;
+            r1 = tr; c1 = tc;
+        }
+
+        fb_console_highlight((uint32_t)r0, (uint32_t)c0, (uint32_t)r1, (uint32_t)c1);
+        selection_active = 1;
+        fb_flush();
+    }
+
+    if (event->type == MOUSE_EVENT_RELEASE && event->button == MOUSE_BUTTON_LEFT) {
+        if (selection_active) {
+            int r0 = sel_start_row, c0 = sel_start_col;
+            int r1 = sel_end_row, c1 = sel_end_col;
+            if (r0 > r1 || (r0 == r1 && c0 > c1)) {
+                int tr = r0, tc = c0;
+                r0 = r1; c0 = c1;
+                r1 = tr; c1 = tc;
+            }
+
+            int pos = 0;
+            for (int r = r0; r <= r1 && pos < (int)SHELL_BUFFER_SIZE - 2; r++) {
+                int start_c = (r == r0) ? c0 : 0;
+                int end_c = (r == r1) ? c1 : cols - 1;
+                int line_end = pos;
+
+                for (int c = start_c; c <= end_c && pos < (int)SHELL_BUFFER_SIZE - 2; c++) {
+                    selection_buffer[pos] = fb_console_get_char((uint32_t)r, (uint32_t)c);
+                    if (selection_buffer[pos] != ' ')
+                        line_end = pos + 1;
+                    pos++;
+                }
+                pos = line_end;
+
+                if (r < r1 && pos < (int)SHELL_BUFFER_SIZE - 2) {
+                    selection_buffer[pos++] = '\n';
+                }
+            }
+            selection_buffer[pos] = '\0';
+        }
+    }
+
+    if (event->type == MOUSE_EVENT_PRESS && event->button == MOUSE_BUTTON_RIGHT) {
+        if (selection_buffer[0]) {
+            fb_console_clear_highlight();
+            selection_active = 0;
+
+            for (int i = 0; selection_buffer[i]; i++) {
+                char c = selection_buffer[i];
+                if (c == '\n') continue;
+                if (input_pos < SHELL_BUFFER_SIZE - 1) {
+                    input_buffer[input_pos++] = c;
+                    input_buffer[input_pos] = '\0';
+                    vga_putchar(c);
+                }
+            }
+            fb_flush();
+        }
+    }
+
+    if (event->type == MOUSE_EVENT_PRESS && event->button == MOUSE_BUTTON_MIDDLE) {
+        fb_console_clear_highlight();
+        selection_active = 0;
+        fb_flush();
+    }
+
+    if (event->type == MOUSE_EVENT_SCROLL) {
+        if (event->dy < 0) {
+            fb_console_scroll_up(3);
+        } else if (event->dy > 0) {
+            fb_console_scroll_down(3);
+        }
+        fb_flush();
+    }
+
+    if (event->type == MOUSE_EVENT_DBLCLICK && event->button == MOUSE_BUTTON_LEFT) {
+        fb_console_clear_highlight();
+        selection_active = 0;
+
+        int wstart = col;
+        int wend = col;
+        while (wstart > 0 && fb_console_get_char((uint32_t)row, (uint32_t)(wstart - 1)) != ' ')
+            wstart--;
+        while (wend < cols - 1 && fb_console_get_char((uint32_t)row, (uint32_t)(wend + 1)) != ' ')
+            wend++;
+        if (fb_console_get_char((uint32_t)row, (uint32_t)wend) == ' ' && wend > wstart)
+            wend--;
+
+        if (wend >= wstart && fb_console_get_char((uint32_t)row, (uint32_t)wstart) != ' ') {
+            fb_console_highlight((uint32_t)row, (uint32_t)wstart, (uint32_t)row, (uint32_t)wend);
+            selection_active = 1;
+            sel_start_row = row;
+            sel_start_col = wstart;
+            sel_end_row = row;
+            sel_end_col = wend;
+
+            int len = wend - wstart + 1;
+            if (len > 0 && len < (int)SHELL_BUFFER_SIZE - 1) {
+                for (int i = 0; i < len; i++)
+                    selection_buffer[i] = fb_console_get_char((uint32_t)row, (uint32_t)(wstart + i));
+                selection_buffer[len] = '\0';
+            }
+            fb_flush();
+        }
+    }
+}
+
 void shell_run(void)
 {
     serial_puts("[SHELL] Entering shell_run\n");
+    mouse_set_event_callback(shell_mouse_handler);
     while (1) {
         keyboard_process_events();
+        mouse_process_events();
         fb_flush();
         __asm__ volatile("sti; hlt");
     }

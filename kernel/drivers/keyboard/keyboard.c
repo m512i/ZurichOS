@@ -183,6 +183,9 @@ static void keyboard_handler(registers_t *regs)
         if (!(status & KBD_STATUS_OUTPUT)) {
             break;
         }
+        if (status & 0x20) {
+            break;
+        }
         
         uint8_t scancode = inb(KBD_DATA_PORT);
         process_scancode(scancode);

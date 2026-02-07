@@ -66,6 +66,7 @@ framebuffer_t *fb_get_info(void);
 void fb_swap_buffers(void);
 void fb_flush(void);
 void fb_clear(uint32_t color);
+void fb_set_vram_hooks(void (*pre)(void), void (*post)(void));
 
 
 static inline void fb_put_pixel(uint32_t *buf, uint32_t pitch,
@@ -103,6 +104,12 @@ void fb_console_scroll_up(uint32_t lines);
 void fb_console_scroll_down(uint32_t lines);
 int fb_console_is_scrolled(void);
 void fb_console_scroll_reset(void);
+uint32_t fb_console_get_cursor_x(void);
+uint32_t fb_console_get_cursor_y(void);
+void fb_console_set_cursor_pos(uint32_t x, uint32_t y);
+void fb_console_highlight(uint32_t r0, uint32_t c0, uint32_t r1, uint32_t c1);
+void fb_console_clear_highlight(void);
+char fb_console_get_char(uint32_t row, uint32_t col);
 
 
 #define FB_FONT_WIDTH   8

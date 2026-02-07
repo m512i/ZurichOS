@@ -33,6 +33,7 @@
 #include <kernel/symbols.h>
 #include <security/security.h>
 #include <drivers/framebuffer.h>
+#include <drivers/mouse.h>
 #include <string.h>
 
 #define KERNEL_HEAP_START   0xD0000000
@@ -265,6 +266,16 @@ void kernel_main(multiboot_info_t *mboot_info, uint32_t magic)
             vga_puts("not available\n");
         }
     }
+    boot_delay();
+
+    vga_puts("Initializing mouse... ");
+    serial_puts("[KERNEL] Initializing PS/2 mouse\n");
+    mouse_init();
+    if (fb_is_available()) {
+        mouse_show_cursor();
+    }
+    vga_puts_ok();
+    vga_puts("\n");
     boot_delay();
 
     vga_puts("Initializing filesystem... ");
