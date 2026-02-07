@@ -1,6 +1,7 @@
 /* VGA Text Mode Driver */
 
 #include <drivers/vga.h>
+#include <drivers/framebuffer.h>
 #include <kernel/kernel.h>
 
 #define VGA_BUFFER  ((uint16_t *)(0xB8000 + KERNEL_VMA))
@@ -33,6 +34,10 @@ void vga_init(void)
 
 void vga_clear(void)
 {
+    if (fb_is_available()) {
+        fb_console_clear();
+        return;
+    }
     for (size_t y = 0; y < VGA_HEIGHT; y++) {
         for (size_t x = 0; x < VGA_WIDTH; x++) {
             const size_t index = y * VGA_WIDTH + x;
@@ -113,6 +118,11 @@ void vga_putchar(char c)
         capture_buffer[capture_pos++] = (uint8_t)c;
         return;
     }
+
+    if (fb_is_available()) {
+        fb_console_putchar(c);
+        return;
+    }
     
     if (c == '\n') {
         terminal_column = 0;
@@ -145,6 +155,10 @@ void vga_putchar(char c)
 
 void vga_puts(const char *str)
 {
+    if (fb_is_available()) {
+        fb_console_puts(str);
+        return;
+    }
     while (*str) {
         vga_putchar(*str++);
     }
@@ -152,8 +166,10 @@ void vga_puts(const char *str)
 
 void vga_put_dec(uint32_t num)
 {
+    if (fb_is_available()) fb_console_begin_batch();
     if (num == 0) {
         vga_putchar('0');
+        if (fb_is_available()) fb_console_end_batch();
         return;
     }
     
@@ -168,15 +184,18 @@ void vga_put_dec(uint32_t num)
     while (--i >= 0) {
         vga_putchar(buf[i]);
     }
+    if (fb_is_available()) fb_console_end_batch();
 }
 
 void vga_put_hex(uint32_t num)
 {
+    if (fb_is_available()) fb_console_begin_batch();
     vga_puts("0x");
     for (int i = 28; i >= 0; i -= 4) {
         uint8_t nibble = (num >> i) & 0xF;
         vga_putchar(nibble < 10 ? '0' + nibble : 'A' + nibble - 10);
     }
+    if (fb_is_available()) fb_console_end_batch();
 }
 
 static void save_screen(void)
@@ -263,6 +282,7 @@ static void display_scrollback(void)
 
 void vga_scroll_up(size_t lines)
 {
+    if (fb_is_available()) return;
     save_screen();
 
     size_t new_offset = scroll_offset + lines;
@@ -283,6 +303,7 @@ void vga_scroll_up(size_t lines)
 
 void vga_scroll_down(size_t lines)
 {
+    if (fb_is_available()) return;
     if (scroll_offset == 0) return; 
 
     if (lines >= scroll_offset) {
@@ -297,11 +318,13 @@ void vga_scroll_down(size_t lines)
 
 int vga_is_scrolled(void)
 {
+    if (fb_is_available()) return 0;
     return scroll_offset > 0;
 }
 
 void vga_scroll_reset(void)
 {
+    if (fb_is_available()) return;
     if (scroll_offset > 0) {
         scroll_offset = 0;
         restore_screen();
@@ -338,6 +361,10 @@ void vga_stop_capture(void)
 
 void vga_puts_ok(void)
 {
+    if (fb_is_available()) {
+        fb_console_puts_ok();
+        return;
+    }
     uint8_t saved_color = terminal_color;
     terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK);
     vga_puts("OK");
@@ -346,6 +373,10 @@ void vga_puts_ok(void)
 
 void vga_puts_fail(void)
 {
+    if (fb_is_available()) {
+        fb_console_puts_fail();
+        return;
+    }
     uint8_t saved_color = terminal_color;
     terminal_color = vga_entry_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
     vga_puts("FAILED");

@@ -190,11 +190,13 @@ dirs:
 	@mkdir -p $(BUILD_DIR)/kernel/drivers/serial
 	@mkdir -p $(BUILD_DIR)/kernel/drivers/keyboard
 	@mkdir -p $(BUILD_DIR)/kernel/drivers/vga
+	@mkdir -p $(BUILD_DIR)/kernel/drivers/mouse
 	@mkdir -p $(BUILD_DIR)/kernel/drivers/pci
 	@mkdir -p $(BUILD_DIR)/kernel/drivers/pit
 	@mkdir -p $(BUILD_DIR)/kernel/drivers/rtc
 	@mkdir -p $(BUILD_DIR)/kernel/drivers/speaker
 	@mkdir -p $(BUILD_DIR)/kernel/drivers/ata
+	@mkdir -p $(BUILD_DIR)/kernel/drivers/framebuffer
 	@mkdir -p $(BUILD_DIR)/kernel/drivers/isolation
 	@mkdir -p $(BUILD_DIR)/kernel/mm
 	@mkdir -p $(BUILD_DIR)/kernel/sync
@@ -211,6 +213,7 @@ dirs:
 	@mkdir -p $(BUILD_DIR)/kernel/ipc
 	@mkdir -p $(BUILD_DIR)/kernel/process
 	@mkdir -p $(BUILD_DIR)/kernel/core
+	@mkdir -p $(BUILD_DIR)/kernel/security
 	@mkdir -p $(BUILD_DIR)/drivers/net
 	@mkdir -p $(BUILD_DIR)/drivers/block
 	@mkdir -p $(BUILD_DIR)/drivers/char
@@ -274,6 +277,7 @@ run: all
 		-serial stdio \
 		-m 256M \
 		-no-shutdown \
+		-vga std \
 		-audiodev dsound,id=audio0 \
 		-machine pcspk-audiodev=audio0 \
 		-netdev user,id=net0,hostfwd=tcp::5555-:80 \
@@ -286,6 +290,7 @@ run-iso: iso
 		-serial stdio \
 		-m 256M \
 		-no-shutdown \
+		-vga std \
 		-audiodev dsound,id=audio0 \
 		-machine pcspk-audiodev=audio0 \
 		$(DISK_ARGS)
@@ -298,6 +303,7 @@ debug: all
 		-serial stdio \
 		-m 256M \
 		-no-shutdown \
+		-vga std \
 		-cpu 486 \
 		-audiodev dsound,id=audio0 \
 		-machine pcspk-audiodev=audio0 \

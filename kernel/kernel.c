@@ -32,10 +32,11 @@
 #include <syscall/syscall.h>
 #include <kernel/symbols.h>
 #include <security/security.h>
+#include <drivers/framebuffer.h>
 #include <string.h>
 
 #define KERNEL_HEAP_START   0xD0000000
-#define KERNEL_HEAP_SIZE    0x00400000  /* 4MB */
+#define KERNEL_HEAP_SIZE    0x00800000  /* 8MB */
 
 static void boot_delay(void)
 {
@@ -221,6 +222,49 @@ void kernel_main(multiboot_info_t *mboot_info, uint32_t magic)
     ata_pci_register();
     vga_puts_ok();
     vga_puts("\n");
+    boot_delay();
+
+    vga_puts("Initializing framebuffer... ");
+    serial_puts("[KERNEL] Checking for framebuffer\n");
+    {
+        int fb_ok = -1;
+        if (mboot_virt->flags & MULTIBOOT_INFO_FRAMEBUFFER_INFO) {
+            uint32_t fb_addr = (uint32_t)mboot_virt->framebuffer_addr;
+            uint32_t fb_width = mboot_virt->framebuffer_width;
+            uint32_t fb_height = mboot_virt->framebuffer_height;
+            uint32_t fb_pitch = mboot_virt->framebuffer_pitch;
+            uint8_t fb_bpp = mboot_virt->framebuffer_bpp;
+            uint8_t fb_type = mboot_virt->framebuffer_type;
+
+            serial_printf("[KERNEL] FB: %dx%d %dbpp type=%d addr=0x%x pitch=%d\n",
+                          fb_width, fb_height, fb_bpp, fb_type, fb_addr, fb_pitch);
+
+            if (fb_type == 1) {
+                /* Type 1 = EGA text mode, try BGA instead */
+                serial_puts("[KERNEL] Multiboot reports text mode, trying BGA\n");
+                fb_ok = fb_init_bga(1024, 768);
+            } else {
+                fb_ok = fb_init(fb_addr, fb_width, fb_height, fb_pitch, fb_bpp);
+            }
+        } else {
+            serial_puts("[KERNEL] No multiboot FB info, trying BGA\n");
+            fb_ok = fb_init_bga(1024, 768);
+        }
+
+        if (fb_ok == 0) {
+            framebuffer_t *fbi = fb_get_info();
+            vga_puts_ok();
+            vga_puts(" (");
+            vga_put_dec(fbi->width);
+            vga_puts("x");
+            vga_put_dec(fbi->height);
+            vga_puts("x");
+            vga_put_dec(fbi->bpp);
+            vga_puts(")\n");
+        } else {
+            vga_puts("not available\n");
+        }
+    }
     boot_delay();
 
     vga_puts("Initializing filesystem... ");

@@ -7,6 +7,7 @@
 #include <kernel/shell.h>
 #include <kernel/kernel.h>
 #include <drivers/vga.h>
+#include <drivers/framebuffer.h>
 #include <drivers/keyboard.h>
 #include <drivers/serial.h>
 #include <fs/vfs.h>
@@ -657,6 +658,7 @@ void shell_run(void)
     serial_puts("[SHELL] Entering shell_run\n");
     while (1) {
         keyboard_process_events();
-        __asm__ volatile("hlt");
+        fb_flush();
+        __asm__ volatile("sti; hlt");
     }
 }

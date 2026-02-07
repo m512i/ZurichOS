@@ -10,6 +10,7 @@
 #include <drivers/keyboard.h>
 #include <arch/x86/idt.h>
 #include <drivers/vga.h>
+#include <drivers/framebuffer.h>
 
 /* I/O ports */
 #define KBD_DATA_PORT       0x60
@@ -195,23 +196,39 @@ void keyboard_process_events(void)
     while (keyboard_get_event(&event)) {
         if (event.pressed && event.extended) {
             int is_shift = (event.modifiers & KEY_MOD_SHIFT) != 0;
+            int use_fb = fb_is_available();
 
             switch (event.scancode) {
                 case SCANCODE_PGUP:
-                    vga_scroll_up(is_shift ? (VGA_HEIGHT / 2) : (VGA_HEIGHT - 1));
+                    if (use_fb)
+                        fb_console_scroll_up(is_shift ? (fb_console_get_rows() / 2) : (fb_console_get_rows() - 1));
+                    else
+                        vga_scroll_up(is_shift ? (VGA_HEIGHT / 2) : (VGA_HEIGHT - 1));
                     continue;
                 case SCANCODE_PGDN:
-                    vga_scroll_down(is_shift ? (VGA_HEIGHT / 2) : (VGA_HEIGHT - 1));
+                    if (use_fb)
+                        fb_console_scroll_down(is_shift ? (fb_console_get_rows() / 2) : (fb_console_get_rows() - 1));
+                    else
+                        vga_scroll_down(is_shift ? (VGA_HEIGHT / 2) : (VGA_HEIGHT - 1));
                     continue;
                 case SCANCODE_HOME:
-                    vga_scroll_up(VGA_SCROLLBACK);
+                    if (use_fb)
+                        fb_console_scroll_up(200);
+                    else
+                        vga_scroll_up(VGA_SCROLLBACK);
                     continue;
                 case SCANCODE_END:
-                    vga_scroll_reset();
+                    if (use_fb)
+                        fb_console_scroll_reset();
+                    else
+                        vga_scroll_reset();
                     continue;
                 case SCANCODE_UP:
                     if (is_shift) {
-                        vga_scroll_up(1);
+                        if (use_fb)
+                            fb_console_scroll_up(1);
+                        else
+                            vga_scroll_up(1);
                         continue;
                     }
                     if (keyboard_callback) {
@@ -222,7 +239,10 @@ void keyboard_process_events(void)
                     continue;
                 case SCANCODE_DOWN:
                     if (is_shift) {
-                        vga_scroll_down(1);
+                        if (use_fb)
+                            fb_console_scroll_down(1);
+                        else
+                            vga_scroll_down(1);
                         continue;
                     }
                     if (keyboard_callback) {
@@ -248,8 +268,11 @@ void keyboard_process_events(void)
             }
         }
         
-        if (event.pressed && event.ascii && vga_is_scrolled()) {
-            vga_scroll_reset();
+        if (event.pressed && event.ascii) {
+            if (fb_is_available() && fb_console_is_scrolled())
+                fb_console_scroll_reset();
+            else if (!fb_is_available() && vga_is_scrolled())
+                vga_scroll_reset();
         }
         
         if (keyboard_event_callback) {
